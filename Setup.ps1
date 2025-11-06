@@ -26,7 +26,6 @@ $envPath = $environmentFolderPath + "\payroc-uat.postman_environment.json";
 $content = Get-Content -Path $envPath -Raw;
 if ($content.Contains('{{ApiKey}}')) {
     $content = $content -replace '{{ApiKey}}', $payrocApiKey;
-    Write-Host "DEBUG: Replaced {{ApiKey}} placeholder";
 }else {
     Write-Host "DEBUG: PayrocAPI {{ApiKey}} placeholder not found. Check your environment file!" -ForegroundColor Red;
 }
