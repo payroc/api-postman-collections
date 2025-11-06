@@ -21,7 +21,16 @@ else {
 # Write Payroc Key into Environment file
 $environmentFolderPath = "$PSScriptRoot\environment";
 $envPath = $environmentFolderPath + "\payroc-uat.postman_environment.json";
-(Get-Content -Path $envPath -Raw) -replace '{{PayrocApiKey}}', $payrocApiKey | Out-File -FilePath $envPath
+
+# Check and replace the correct placeholder
+$content = Get-Content -Path $envPath -Raw;
+if ($content.Contains('{{ApiKey}}')) {
+    $content = $content -replace '{{ApiKey}}', $payrocApiKey;
+}else {
+    Write-Host "DEBUG: PayrocAPI {{ApiKey}} placeholder not found. Check your environment file!" -ForegroundColor Red;
+}
+
+$content | Out-File -FilePath $envPath -Encoding UTF8
 
 # Set the Postman API URL
 $postmanApiUrl = "https://api.postman.com";
