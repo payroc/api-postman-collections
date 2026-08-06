@@ -119,6 +119,7 @@ Write-Host "Environments imported.";
 # Specify the folder path containing the collection JSON files
 
 $collectionFolderPath = "$PSScriptRoot\collections";
+$specFolderPath = "$PSScriptRoot\spec";
 
 # Get a list of JSON files in the specified folder
 $collectionFiles = Get-ChildItem -Path $collectionFolderPath -Filter "*.json";
@@ -155,5 +156,94 @@ foreach ($collectionFile in $collectionFiles) {
 }
 
 Write-Host "Collections imported.";
+
+if (Test-Path -Path $specFolderPath) {
+    $specFiles = Get-ChildItem -Path $specFolderPath -File -Recurse;
+
+    if ($specFiles.Count -gt 0) {
+        $rootSpecFile = $specFiles |
+            Where-Object { $_.Extension -in ".yaml", ".yml", ".json" } |
+            Sort-Object FullName |
+            Select-Object -First 1;
+
+        if ($null -eq $rootSpecFile) {
+            Write-Host "No supported spec files found. Skipping spec import." -ForegroundColor Yellow;
+        }
+        else {
+            $rootSpecContent = Get-Content -Path $rootSpecFile.FullName -Raw;
+
+            $specVersion = $null;
+            if ($rootSpecContent -match '(?m)^\s*openapi:\s*["'']?([0-9]+\.[0-9]+(?:\.[0-9]+)?)') {
+                $specVersion = $Matches[1];
+            }
+            elseif ($rootSpecContent -match '(?m)"openapi"\s*:\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"') {
+                $specVersion = $Matches[1];
+            }
+            elseif ($rootSpecContent -match '(?m)^\s*swagger:\s*["'']?(2(?:\.0)?)') {
+                $specVersion = $Matches[1];
+            }
+            elseif ($rootSpecContent -match '(?m)"swagger"\s*:\s*"(2(?:\.0)?)"') {
+                $specVersion = $Matches[1];
+            }
+
+            switch -Regex ($specVersion) {
+                '^3\.1' { $specType = "OPENAPI:3.1"; break }
+                '^3\.0' { $specType = "OPENAPI:3.0"; break }
+                '^2(\.0)?$' { $specType = "OPENAPI:2.0"; break }
+                default { throw "Unsupported or unknown spec version '$specVersion' in '$($rootSpecFile.Name)'." }
+            }
+
+            $specTitle = $null;
+            if ($rootSpecContent -match '(?m)^\s*title:\s*(.+)$') {
+                $specTitle = $Matches[1].Trim().Trim("'").Trim([char]34);
+            }
+            elseif ($rootSpecContent -match '(?m)"title"\s*:\s*"([^"]+)"') {
+                $specTitle = $Matches[1];
+            }
+
+            if ([string]::IsNullOrWhiteSpace($specTitle)) {
+                $specTitle = [System.IO.Path]::GetFileNameWithoutExtension($rootSpecFile.Name);
+            }
+
+            $specName = "$specTitle Specification";
+
+            $existingSpecsResponse = Invoke-RestMethod -Method Get -Uri "$postmanApiUrl/specs?workspaceId=$workSpaceId&limit=100" -Headers $headers;
+
+            foreach ($existingSpec in $existingSpecsResponse.specs) {
+                if ($existingSpec.name -eq $specName) {
+                    Write-Host "Deleting spec '$specName'...";
+                    Invoke-RestMethod -Uri "$postmanApiUrl/specs/$($existingSpec.id)" -Headers $headers -Method Delete | Out-Null;
+                }
+            }
+
+            $specPayload = @{
+                name  = $specName;
+                type  = $specType;
+                files = @(
+                    $specFiles |
+                    Sort-Object FullName |
+                    ForEach-Object {
+                        @{
+                            path    = ([System.IO.Path]::GetRelativePath($specFolderPath, $_.FullName) -replace '\\', '/');
+                            content = Get-Content -Path $_.FullName -Raw;
+                        }
+                    }
+                );
+            } | ConvertTo-Json -Depth 100;
+
+            Write-Host "Creating spec '$specName'...";
+            Invoke-RestMethod -Uri "$postmanApiUrl/specs?workspaceId=$workSpaceId" -Headers $headers -Method Post -Body $specPayload | Out-Null;
+
+            Write-Host "Specs imported.";
+        }
+    }
+    else {
+        Write-Host "No spec files found. Skipping spec import." -ForegroundColor Yellow;
+    }
+}
+else {
+    Write-Host "No spec directory found. Skipping spec import." -ForegroundColor Yellow;
+}
+
 Write-Host "Setup complete.";
 Write-Host;
